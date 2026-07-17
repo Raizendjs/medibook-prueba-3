@@ -1,0 +1,41 @@
+---
+interface Props {
+  id: string;
+  title: string;
+  city: string | null;
+  country: string;
+  price: number;
+  currency: string;
+  coverUrl: string | null;
+}
+
+const { id, title, city, country, price, currency, coverUrl } = Astro.props;
+---
+
+<a href={`/listings/${id}/`} class="group block">
+  <div class="aspect-square w-full overflow-hidden rounded-2xl bg-neutral-100">
+    {coverUrl ? (
+      <img
+        src={coverUrl}
+        alt={title}
+        class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+        loading="lazy"
+      />
+    ) : (
+      <div class="flex h-full w-full items-center justify-center text-neutral-400 text-sm">
+        Sin foto
+      </div>
+    )}
+  </div>
+
+  <div class="mt-2.5 space-y-0.5">
+    <p class="text-sm font-semibold text-neutral-900 truncate">{title}</p>
+    <p class="text-sm text-neutral-500">
+      {city ? `${city}, ${country}` : country}
+    </p>
+    <p class="text-sm text-neutral-900 mt-1">
+      <span class="font-semibold">{currency} {price}</span>
+      <span class="text-neutral-500"> / noche</span>
+    </p>
+  </div>
+</a>

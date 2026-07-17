@@ -1,0 +1,309 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { createClient } from "@supabase/supabase-js";
+import BookingsList from "../components/BookingsList";
+import ListingForm from "../components/ListingForm";
+import { createSupabaseServerClient } from "../lib/supabase/server";
+
+// ✅ Este es el usuario real autenticado (incluye datos de Google en user_metadata)
+const user = Astro.locals.user;
+
+const displayName =
+  user?.user_metadata?.full_name ||
+  user?.user_metadata?.name ||
+  "Usuario";
+
+const avatarUrl =
+  user?.user_metadata?.avatar_url ||
+  user?.user_metadata?.picture ||
+  null;
+
+const initial = user?.email?.[0]?.toUpperCase() || "U";
+
+// Cliente admin — SOLO para listar usuarios y estadísticas
+const supabaseAdmin = createClient(
+  import.meta.env.PUBLIC_SUPABASE_URL!,
+  import.meta.env.SUPABASE_SERVICE_ROLE_KEY!
+);
+
+const { data } = await supabaseAdmin.auth.admin.listUsers();
+const users = data?.users ?? [];
+
+const isOnline = (u) => {
+  const last = new Date(u.last_sign_in_at || 0).getTime();
+  return (Date.now() - last) / 60000 < 10;
+};
+
+// Cliente con sesión del usuario — para leer SUS reservas (respeta RLS)
+const supabaseServer = createSupabaseServerClient({
+  request: Astro.request,
+  cookies: Astro.cookies,
+});
+
+const { data: userData } = await supabaseServer.auth.getUser();
+
+const { data: bookingsRaw } = await supabaseServer
+  .from("bookings")
+  .select(
+    "id, check_in, check_out, guests, total_price, status, listings(id, title, city, country, currency, listing_images(url, order_index))"
+  )
+  .eq("user_id", userData.user.id)
+  .order("check_in", { ascending: true });
+
+function getCoverUrl(listing: any) {
+  if (!listing?.listing_images || listing.listing_images.length === 0) return null;
+  const sorted = [...listing.listing_images].sort(
+    (a: any, b: any) => a.order_index - b.order_index
+  );
+  return sorted[0].url;
+}
+
+const bookings = (bookingsRaw ?? []).map((b: any) => ({
+  id: b.id,
+  check_in: b.check_in,
+  check_out: b.check_out,
+  guests: b.guests,
+  total_price: b.total_price,
+  status: b.status,
+  listing: {
+    id: b.listings.id,
+    title: b.listings.title,
+    city: b.listings.city,
+    country: b.listings.country,
+    currency: b.listings.currency,
+    coverUrl: getCoverUrl(b.listings),
+  },
+}));
+---
+
+<BaseLayout title="Dashboard" description="Panel moderno">
+
+<div class="min-h-screen bg-slate-50 dark:bg-slate-950 mt-15 text-slate-900 dark:text-white">
+
+  <div class="flex flex-col lg:flex-row min-h-screen">
+
+    <!-- SIDEBAR -->
+    <aside class="w-full lg:w-72 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 p-6 flex flex-col">
+
+      <!-- PROFILE HEADER -->
+      <div class="flex items-center gap-3 pb-6 border-b border-slate-200 dark:border-slate-800">
+
+        {avatarUrl ? (
+          <img
+            src={avatarUrl}
+            referrerpolicy="no-referrer"
+            class="w-12 h-12 rounded-full object-cover"
+            alt={displayName}
+          />
+        ) : (
+          <div class="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold">
+            {initial}
+          </div>
+        )}
+
+        <div class="min-w-0">
+          <p class="font-semibold truncate">
+            {displayName}
+          </p>
+          <p class="text-xs text-slate-500 truncate">
+            {user?.email}
+          </p>
+        </div>
+
+      </div>
+
+      <!-- STATUS -->
+      <div class="mt-5 mb-6 p-3 rounded-xl bg-slate-100 dark:bg-slate-800 flex justify-between items-center shadow-sm">
+        <span class="text-xs text-slate-500">Estado</span>
+        <span class="text-xs px-2 py-1 rounded-full bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-300">
+          🟢 Online
+        </span>
+      </div>
+
+      <!-- MENU -->
+      <nav class="space-y-2 text-sm flex-1">
+
+        <a href="#overview" class="block px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition">
+          📊 Overview
+        </a>
+
+        <a href="#users" class="block px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition">
+          👥 Usuarios
+        </a>
+
+        <a href="#stats" class="block px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition">
+          📈 Estadísticas
+        </a>
+
+        <!-- LOGOUT: formulario real, sin fetch -->
+        <form method="POST" action="/api/logout/">
+          <button
+            type="submit"
+            class="mt-4 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg
+                   bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white
+                   transition shadow-sm"
+          >
+            🚪 Cerrar sesión
+          </button>
+        </form>
+
+      </nav>
+
+      <!-- FOOTER SIDEBAR -->
+      <div class="pt-6 border-t border-slate-200 dark:border-slate-800 text-xs text-slate-500">
+        Sistema Admin v1.0
+      </div>
+
+    </aside>
+
+    <!-- MAIN -->
+    <main class="flex-1 p-6 space-y-10">
+
+      <!-- HEADER PRINCIPAL -->
+      <section class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+
+        <div class="flex items-center gap-4">
+
+          {avatarUrl ? (
+            <img
+              src={avatarUrl}
+              referrerpolicy="no-referrer"
+              class="w-14 h-14 rounded-full object-cover shadow-md"
+              alt={displayName}
+            />
+          ) : (
+            <div class="w-14 h-14 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg shadow-md">
+              {initial}
+            </div>
+          )}
+
+          <div>
+            <h1 class="text-2xl font-bold">
+              {displayName}
+            </h1>
+
+            <p class="text-sm text-slate-500">
+              {user?.email}
+            </p>
+
+            <p class="text-xs text-green-500 font-medium">
+              🟢 Sesión activa
+            </p>
+          </div>
+
+        </div>
+
+        <div class="text-right text-sm text-slate-500">
+          Último acceso:<br>
+          <span class="text-black dark:text-white font-medium">
+            {user?.last_sign_in_at
+              ? new Date(user.last_sign_in_at).toLocaleString()
+              : "Sin datos"}
+          </span>
+        </div>
+
+      </section>
+
+      <!-- OVERVIEW -->
+      <section id="overview" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+        <div class="bg-white dark:bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-200 dark:border-slate-800">
+          <p class="text-xs text-slate-500">Usuarios</p>
+          <p class="text-2xl font-bold">{users.length}</p>
+        </div>
+
+        <div class="bg-white dark:bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-200 dark:border-slate-800">
+          <p class="text-xs text-slate-500">Activos</p>
+          <p class="text-2xl font-bold text-green-500">
+            {users.filter(isOnline).length}
+          </p>
+        </div>
+
+        <div class="bg-white dark:bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-200 dark:border-slate-800">
+          <p class="text-xs text-slate-500">Inactivos</p>
+          <p class="text-2xl font-bold text-slate-400">
+            {users.filter(u => !isOnline(u)).length}
+          </p>
+        </div>
+
+      </section>
+
+      <div class="w-full h-auto flex flex-col lg:flex-row md:flex-row gap-4 mt-10">
+
+        <div class="lg:w-6/12 w-full h-auto">
+
+          <!-- USERS -->
+          <section id="users">
+
+            <h2 class="text-xl font-bold mb-4">Usuarios</h2>
+
+            <div class="space-y-3">
+
+              {users.map((u) => {
+
+                const online = isOnline(u);
+                const uAvatar = u.user_metadata?.avatar_url || u.user_metadata?.picture || null;
+                const uName = u.user_metadata?.full_name || u.user_metadata?.name || "Sin nombre";
+
+                return (
+                  <div class="flex justify-between items-center p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+
+                    <div class="flex items-center gap-3">
+
+                      {uAvatar ? (
+                        <img
+                          src={uAvatar}
+                          referrerpolicy="no-referrer"
+                          class="w-10 h-10 rounded-full object-cover"
+                          alt={uName}
+                        />
+                      ) : (
+                        <div class="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center font-bold">
+                          {u.email?.[0]?.toUpperCase()}
+                        </div>
+                      )}
+
+                      <div>
+                        <p class="font-medium text-sm">
+                          {uName}
+                        </p>
+                        <p class="text-xs text-slate-500">{u.email}</p>
+                      </div>
+
+                    </div>
+
+                    <span class={`text-xs px-3 py-1 rounded-full ${
+                      online
+                        ? "bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-300"
+                        : "bg-slate-200 text-slate-500"
+                    }`}>
+                      {online ? "Online" : "Offline"}
+                    </span>
+
+                  </div>
+                );
+              })}
+
+            </div>
+
+          </section>
+
+        </div>
+
+        <div class="lg:w-6/12 w-full h-auto">
+          <ListingForm client:load />
+        </div>
+
+        <div class="lg:w-6/12 w-full h-auto">
+          <BookingsList client:load initialBookings={bookings} />
+        </div>
+
+      </div>
+
+    </main>
+
+  </div>
+
+</div>
+
+</BaseLayout>

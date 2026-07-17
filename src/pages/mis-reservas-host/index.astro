@@ -1,0 +1,130 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import HostBookingsList from "../../components/HostBookingsList";
+import { createSupabaseServerClient } from "../../lib/supabase/server";
+
+const supabase = createSupabaseServerClient({
+  request: Astro.request,
+  cookies: Astro.cookies,
+});
+
+const { data: userData, error: userError } = await supabase.auth.getUser();
+
+if (userError || !userData.user) {
+  return Astro.redirect("/login/");
+}
+
+// 1. Reservas + listing (sin fotos ni perfiles todavía)
+const { data: bookingsRaw, error } = await supabase
+  .from("bookings")
+  .select(
+    `
+    id,
+    check_in,
+    check_out,
+    guests,
+    total_price,
+    status,
+    user_id,
+    listings!inner (
+      id,
+      title,
+      city,
+      country,
+      currency,
+      host_id
+    )
+  `
+  )
+  .eq("listings.host_id", userData.user.id)
+  .order("check_in", { ascending: true });
+
+// 2. Fotos: una query aparte a listing_images
+const listingIds = [...new Set((bookingsRaw ?? []).map((b: any) => b.listings.id))];
+
+let imagesMap: Record<string, string> = {};
+
+if (listingIds.length > 0) {
+  const { data: imagesData, error: imagesError } = await supabase
+    .from("listing_images")
+    .select("listing_id, url, order_index")
+    .in("listing_id", listingIds)
+    .order("order_index", { ascending: true });
+
+  if (!imagesError && imagesData) {
+    for (const img of imagesData) {
+      // Como viene ordenado ascendente, la primera vez que veo el listing_id
+      // es la imagen con menor order_index (la portada)
+      if (!imagesMap[img.listing_id]) {
+        imagesMap[img.listing_id] = img.url;
+      }
+    }
+  } else if (imagesError) {
+    console.error("No se pudieron cargar imágenes:", imagesError.message);
+  }
+}
+
+// 3. Perfiles del huésped (query aparte, PENDIENTE de confirmar nombre de tabla)
+let profilesMap: Record<string, { full_name: string | null; avatar_url: string | null }> = {};
+
+const userIds = [...new Set((bookingsRaw ?? []).map((b: any) => b.user_id))];
+
+if (userIds.length > 0) {
+  const { data: profilesData, error: profilesError } = await supabase
+    .from("profiles") // 👈 esto probablemente hay que cambiarlo, ver nota abajo
+    .select("id, full_name, avatar_url")
+    .in("id", userIds);
+
+  if (!profilesError && profilesData) {
+    profilesMap = Object.fromEntries(
+      profilesData.map((p: any) => [p.id, { full_name: p.full_name, avatar_url: p.avatar_url }])
+    );
+  } else if (profilesError) {
+    console.error("No se pudieron cargar perfiles de huéspedes:", profilesError.message);
+  }
+}
+
+const bookings = (bookingsRaw ?? []).map((b: any) => ({
+  id: b.id,
+  check_in: b.check_in,
+  check_out: b.check_out,
+  guests: b.guests,
+  total_price: b.total_price,
+  status: b.status,
+  userId: b.user_id,
+  guestName: profilesMap[b.user_id]?.full_name ?? null,
+  guestAvatar: profilesMap[b.user_id]?.avatar_url ?? null,
+  listing: {
+    id: b.listings.id,
+    title: b.listings.title,
+    city: b.listings.city,
+    country: b.listings.country,
+    currency: b.listings.currency,
+    imageUrl: imagesMap[b.listings.id] ?? null,
+  },
+}));
+---
+
+<BaseLayout title="Reservas de mis propiedades">
+  <main class="max-w-3xl mx-auto px-4 sm:px-6 py-8">
+    <div class="flex items-center justify-between mb-6">
+      <h1 class="text-2xl font-bold text-neutral-900 tracking-tight">
+        Reservas de mis propiedades
+      </h1>
+
+      <a href="/dashboard/"
+        class="text-sm text-neutral-500 hover:text-neutral-900 transition-colors"
+      >
+        ← Volver al dashboard
+      </a>
+    </div>
+
+    {error && (
+      <p class="text-sm text-[#FF385C]">
+        Hubo un error cargando las reservas. Intenta de nuevo.
+      </p>
+    )}
+
+    {!error && <HostBookingsList client:load initialBookings={bookings} />}
+  </main>
+</BaseLayout>

@@ -1,0 +1,67 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import MyListingsList from "../../components/MyListingsList";
+import { createSupabaseServerClient } from "../../lib/supabase/server";
+
+const supabaseServer = createSupabaseServerClient({
+  request: Astro.request,
+  cookies: Astro.cookies,
+});
+
+const { data: userData, error: userError } = await supabaseServer.auth.getUser();
+
+if (userError || !userData.user) {
+  return Astro.redirect("/login/");
+}
+
+const { data: listingsRaw, error } = await supabaseServer
+  .from("listings")
+  .select("id, title, city, country, price, currency, status, listing_images(url, order_index)")
+  .eq("host_id", userData.user.id)
+  .order("created_at", { ascending: false });
+
+function getCoverUrl(listing: any) {
+  if (!listing.listing_images || listing.listing_images.length === 0) return null;
+  const sorted = [...listing.listing_images].sort(
+    (a: any, b: any) => a.order_index - b.order_index
+  );
+  return sorted[0].url;
+}
+
+const listings = (listingsRaw ?? []).map((l: any) => ({
+  id: l.id,
+  title: l.title,
+  city: l.city,
+  country: l.country,
+  price: l.price,
+  currency: l.currency,
+  status: l.status,
+  coverUrl: getCoverUrl(l),
+}));
+---
+
+<BaseLayout title="Mis propiedades">
+
+    <br><br>
+  <main class="max-w-3xl mx-auto px-4 sm:px-6 py-8">
+    <div class="flex items-center justify-between mb-6">
+      <h1 class="text-2xl font-bold text-black dark:text-white tracking-tight">
+        Mis propiedades
+      </h1>
+      
+      <a  href="/dashboard/"
+        class="text-sm font-semibold text-[#FF385C] hover:underline"
+      >
+        + Publicar nueva
+      </a>
+    </div>
+
+    {error && (
+      <p class="text-sm text-[#FF385C]">
+        Hubo un error cargando tus propiedades. Intenta de nuevo.
+      </p>
+    )}
+
+    {!error && <MyListingsList client:load initialListings={listings} />}
+  </main>
+</BaseLayout>

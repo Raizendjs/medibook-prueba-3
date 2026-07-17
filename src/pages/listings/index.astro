@@ -1,0 +1,123 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import ListingCard from "../../components/ListingCard.astro";
+import { createSupabaseServerClient } from "../../lib/supabase/server";
+
+const supabase = createSupabaseServerClient({
+  request: Astro.request,
+  cookies: Astro.cookies,
+});
+
+// Filtros desde la URL, ej: /listings?country=Ecuador&city=Quito&min=20&max=100
+const country = Astro.url.searchParams.get("country") ?? "";
+const city = Astro.url.searchParams.get("city") ?? "";
+const min = Astro.url.searchParams.get("min") ?? "";
+const max = Astro.url.searchParams.get("max") ?? "";
+
+let query = supabase
+  .from("listings")
+  .select("id, title, city, country, price, currency, listing_images(url, order_index)")
+  .eq("status", "active")
+  .order("created_at", { ascending: false });
+
+if (country) query = query.ilike("country", `%${country}%`);
+if (city) query = query.ilike("city", `%${city}%`);
+if (min) query = query.gte("price", Number(min));
+if (max) query = query.lte("price", Number(max));
+
+const { data: listings, error } = await query;
+
+function getCoverUrl(listing: any) {
+  if (!listing.listing_images || listing.listing_images.length === 0) return null;
+  const sorted = [...listing.listing_images].sort(
+    (a, b) => a.order_index - b.order_index
+  );
+  return sorted[0].url;
+}
+---
+
+<BaseLayout title="Explora propiedades">
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+    <h1 class="text-2xl font-bold text-neutral-900 tracking-tight mb-6">
+      Encuentra tu próximo lugar
+    </h1>
+
+    <!-- Filtros -->
+    <form method="GET" class="flex flex-wrap gap-3 mb-8">
+      <input
+        type="text"
+        name="country"
+        value={country}
+        placeholder="País"
+        class="rounded-full border border-neutral-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900"
+      />
+      <input
+        type="text"
+        name="city"
+        value={city}
+        placeholder="Ciudad"
+        class="rounded-full border border-neutral-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900"
+      />
+      <input
+        type="number"
+        name="min"
+        value={min}
+        placeholder="Precio mín."
+        class="w-32 rounded-full border border-neutral-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900"
+      />
+      <input
+        type="number"
+        name="max"
+        value={max}
+        placeholder="Precio máx."
+        class="w-32 rounded-full border border-neutral-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900"
+      />
+      <button
+        type="submit"
+        class="rounded-full bg-[#FF385C] hover:bg-[#E31C5F] text-white text-sm font-semibold px-6 py-2 transition-colors"
+      >
+        Buscar
+      </button>
+      {(country || city || min || max) && (
+        <a
+          href="/listings"
+          class="rounded-full border border-neutral-300 text-sm font-medium px-4 py-2 flex items-center hover:border-neutral-900 transition-colors"
+        >
+          Limpiar filtros
+        </a>
+      )}
+    </form>
+
+    <!-- Resultados -->
+    {error && (
+      <p class="text-sm text-[#FF385C]">
+        Hubo un error cargando las propiedades. Intenta de nuevo.
+      </p>
+    )}
+
+    {!error && listings && listings.length === 0 && (
+      <div class="text-center py-20">
+        <p class="text-neutral-900 font-semibold">No encontramos propiedades</p>
+        <p class="text-neutral-500 text-sm mt-1">
+          Prueba con otros filtros o quita alguno.
+        </p>
+      </div>
+    )}
+
+    {!error && listings && listings.length > 0 && (
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-x-4 gap-y-8">
+        {listings.map((listing) => (
+          <ListingCard
+            id={listing.id}
+            title={listing.title}
+            city={listing.city}
+            country={listing.country}
+            price={listing.price}
+            currency={listing.currency}
+            coverUrl={getCoverUrl(listing)}
+          />
+        ))}
+      </div>
+    )}
+  </main>
+</BaseLayout>
